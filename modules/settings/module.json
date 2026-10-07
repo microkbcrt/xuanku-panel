@@ -1,0 +1,10 @@
+{
+  "id": "settings",
+  "name": "设置",
+  "icon": "gear",
+  "order": 6,
+  "description": "扩展中心",
+  "js": "module.js",
+  "css": "module.css",
+  "api": true
+}

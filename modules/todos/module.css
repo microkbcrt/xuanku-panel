@@ -1,0 +1,53 @@
+/* 待办模块样式（.form-grid / .mini-btn 等通用组件见 main.css） */
+
+.todo-list { display: flex; flex-direction: column; }
+
+.todo-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 6px; border-bottom: 1px solid var(--divider);
+  animation: todoIn .28s var(--ease-out) both;
+}
+.todo-item:last-child { border-bottom: none; }
+@keyframes todoIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.todo-item:hover { background: var(--hover); border-radius: 12px; }
+
+.todo-check {
+  flex: none; width: 24px; height: 24px; margin-top: 2px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--brand1) 55%, transparent);
+  background: transparent; color: transparent; cursor: pointer;
+  display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast) var(--ease-out);
+}
+.todo-check:hover { transform: scale(1.08); }
+.is-done .todo-check {
+  background: var(--brand1);
+  border-color: transparent; color: #fff;
+}
+
+.todo-main { flex: 1; min-width: 0; cursor: pointer; }
+.todo-title {
+  font-size: 14.5px; font-weight: 600; line-height: 1.4;
+  word-break: break-word;
+}
+.is-done .todo-title { text-decoration: line-through; opacity: .45; }
+.todo-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.todo-note {
+  font-size: 11.5px; color: var(--muted); max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.is-over .todo-title { color: var(--danger); }
+
+.p-high { color: #fff; background: var(--danger); border: none; }
+.p-mid {
+  color: var(--warn); border: none;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.p-low { color: var(--muted); }
+
+.todo-actions { display: flex; gap: 6px; opacity: .35; transition: opacity var(--t-fast); }
+.todo-item:hover .todo-actions { opacity: 1; }
+
+@media (max-width: 640px) {
+  .todo-actions { opacity: .8; }
+  .todo-item { gap: 10px; padding: 11px 2px; }
+}

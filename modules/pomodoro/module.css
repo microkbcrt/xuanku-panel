@@ -1,0 +1,65 @@
+/* 番茄钟模块样式 */
+
+.pomo-card { text-align: center; padding: 22px 16px 24px; }
+
+.pomo-ring {
+  position: relative; width: min(258px, 68vw); aspect-ratio: 1 / 1;
+  margin: 18px auto 6px;
+}
+.pomo-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.pomo-track { fill: none; stroke: var(--panel-2); stroke-width: 13; }
+.pomo-bar {
+  fill: none; stroke: var(--brand2); stroke-width: 13; stroke-linecap: round;
+  transition: stroke-dashoffset .35s linear;
+}
+.pomo-bar.work { stroke: var(--brand1); }
+
+.pomo-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 4px;
+}
+.pomo-time {
+  font-size: clamp(40px, 13vw, 54px); font-weight: 700; letter-spacing: 2px;
+  font-variant-numeric: tabular-nums; line-height: 1;
+  background: linear-gradient(135deg, var(--brand1), var(--brand2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.pomo-mode-label { font-size: 13px; color: var(--muted); letter-spacing: 3px; }
+.pomo-rounds { display: flex; gap: 7px; margin-top: 6px; }
+.pomo-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--panel-2); border: 1px solid var(--line);
+  transition: background var(--t-fast);
+}
+.pomo-dot.done {
+  background: var(--brand1);
+  border-color: transparent;
+}
+.pomo-dot.cur { background: var(--brand2); border-color: transparent; animation: pulse 1.4s ease-in-out infinite; }
+
+.pomo-main-btn {
+  min-width: 148px; height: 48px; font-size: 16px; border-radius: 999px;
+  justify-content: center; letter-spacing: 1px;
+}
+.pomo-main-btn.is-pause {
+  background: var(--panel-2); color: var(--text);
+}
+
+.pomo-rec {
+  display: flex; align-items: center; gap: 11px; padding: 10px 4px;
+  border-bottom: 1px solid var(--divider);
+}
+.pomo-rec:last-child { border-bottom: none; }
+.pomo-rec-icon { display: grid; place-items: center; color: var(--brand1); }
+.pomo-rec-icon svg { width: 18px; height: 18px; display: block; }
+.pomo-rec-main { flex: 1; min-width: 0; }
+.pomo-rec-title {
+  font-size: 13.5px; font-weight: 600;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.pomo-rec-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+@media (max-width: 640px) {
+  .pomo-card { padding: 16px 10px 20px; }
+  .pomo-main-btn { min-width: 120px; }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "chaoxing",
+  "name": "学习通",
+  "icon": "book",
+  "order": 5,
+  "description": "课程进度",
+  "js": "module.js",
+  "css": "module.css"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "todos",
+  "name": "待办",
+  "icon": "list",
+  "order": 2,
+  "description": "任务清单",
+  "js": "module.js",
+  "css": "module.css"
+}

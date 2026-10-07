@@ -1,0 +1,9 @@
+{
+  "id": "pomodoro",
+  "name": "番茄钟",
+  "icon": "timer",
+  "order": 3,
+  "description": "专注计时",
+  "js": "module.js",
+  "css": "module.css"
+}

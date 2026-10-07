@@ -1,0 +1,9 @@
+{
+  "id": "run",
+  "name": "校园跑",
+  "icon": "run",
+  "order": 4,
+  "description": "里程记录",
+  "js": "module.js",
+  "css": "module.css"
+}
