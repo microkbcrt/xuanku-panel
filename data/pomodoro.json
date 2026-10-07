@@ -1,0 +1,11 @@
+{
+  "settings": {
+    "work": 25,
+    "short": 5,
+    "long": 15,
+    "rounds": 4,
+    "sound": true,
+    "autoNext": false
+  },
+  "sessions": []
+}
