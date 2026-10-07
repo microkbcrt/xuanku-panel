@@ -216,7 +216,7 @@
 
   /** 原始 HTTP：网络失败 reject TypeError；其余返回 {status, rev, body} */
   function http(action, mod, path, body, method, base) {
-    if (ghEnabled() && !base) { return ghHandle(action, mod, path, body, method); }
+    if (ghEnabled() && !base) { return localHandle(action, mod, path, body, method); }
     method = method || (action === 'get' ? 'GET' : 'POST');
     var headers = { 'X-Panel-Token': base ? effectiveToken() : TOKEN };
     var payload = null;
@@ -509,17 +509,28 @@
     return step();
   }
 
-  /* ---------------- GitHub 后端（无 PHP 的静态/移动端模式） ----------------
-   * BOOT.backend = { type:'github', owner, repo, branch, dir }
-   * 数据文件：<dir>/<模块>.json（内容），<dir>/<模块>.meta.json（{rev,updatedAt}）
-   * 令牌：localStorage panel.githubToken（设置页填写，PAT，勿写死）
-   * 语义与 api.php 的 get/set/save/remove/reset/export/import 完全一致。
+  /* ---------------- 本地优先 + GitHub 手动备份 ----------------
+   * 每端数据独立、日常离线可用：
+   *   · 无 PHP 模式（BOOT.backend.type==='github'，静态站/Android）：数据存本地
+   *     localStorage panel.local.<模块>，默认值内嵌在 BOOT.defaults —— 本端独立。
+   *   · PHP 模式（本地服务器/Electron）：数据在 data/<id>.json —— 本端独立。
+   * GitHub 仅作备份/迁移：设置页「上传到 GitHub / 从 GitHub 拉取」（Panel.github.push/pull），
+   * 读写仓库 <dir>/<id>.json（整体快照，不做实时同步、不追踪 rev）。
+   * 令牌：localStorage panel.githubToken（设置页填写，PAT，勿写死）。
    * ------------------------------------------------------------------- */
   var GH = (BOOT.backend && BOOT.backend.type === 'github') ? BOOT.backend : null;
+  var GH_DEFAULT = { owner: 'microkbcrt', repo: 'xuanku-panel', branch: 'main', dir: 'data' };
   var GH_TOKEN_KEY = 'panel.githubToken';
   var GH_API = 'https://api.github.com';
 
   function ghEnabled() { return !!GH; }
+  function ghRepo() {
+    try {
+      var o = JSON.parse(localStorage.getItem('panel.githubRepo') || 'null');
+      if (o && o.owner && o.repo) return Object.assign({}, GH_DEFAULT, o);
+    } catch (e) {}
+    return GH_DEFAULT;
+  }
   function ghToken() {
     var t = '';
     try { t = localStorage.getItem(GH_TOKEN_KEY) || ''; } catch (e) {}
@@ -536,7 +547,8 @@
   function ghB64Decode(b64) { return decodeURIComponent(escape(atob(String(b64).replace(/\s/g, '')))); }
   function ghParse(txt) { try { return txt ? JSON.parse(txt) : null; } catch (e) { return null; } }
   function ghContentsPath(rel) {
-    return '/repos/' + GH.owner + '/' + GH.repo + '/contents/' + rel + '?ref=' + (GH.branch || 'main');
+    var r = ghRepo();
+    return '/repos/' + r.owner + '/' + r.repo + '/contents/' + rel + '?ref=' + (r.branch || 'main');
   }
   function ghGetFile(rel) {
     return fetch(GH_API + ghContentsPath(rel), { headers: ghHeaders() }).then(function (res) {
@@ -552,25 +564,64 @@
       });
     }).catch(function () { return { exists: false, sha: null, offline: true }; });
   }
-  /* 已读/已写的最近数据缓存：离线时兜底，避免首屏退化成空数据 */
-  function ghCacheSave(mod, doc, rev) {
-    try {
-      var c = JSON.parse(localStorage.getItem('panel.ghCache') || '{}');
-      c[mod] = { doc: doc, rev: rev, at: Date.now() };
-      localStorage.setItem('panel.ghCache', JSON.stringify(c));
-    } catch (e) {}
+  /* --- 本地数据镜像（无 PHP 模式）：每端独立、离线可用 --- */
+  var LOCAL_PREFIX = 'panel.local.';
+  function localClone(o) { return (o && typeof o === 'object') ? JSON.parse(JSON.stringify(o)) : {}; }
+  function ghDefaults(mod) {
+    if (BOOT.defaults && BOOT.defaults[mod] && typeof BOOT.defaults[mod] === 'object') {
+      return localClone(BOOT.defaults[mod]);
+    }
+    return {};
   }
-  function ghCacheLoad(mod) {
+  function readLocMod(mod) {
     try {
-      var c = JSON.parse(localStorage.getItem('panel.ghCache') || '{}');
-      if (c[mod] && c[mod].doc) return c[mod];
+      var s = localStorage.getItem(LOCAL_PREFIX + mod);
+      if (s) { var d = JSON.parse(s); if (d && typeof d === 'object') return d; }
     } catch (e) {}
-    return null;
+    return ghDefaults(mod);
   }
+  function writeLocMod(mod, doc) {
+    try { localStorage.setItem(LOCAL_PREFIX + mod, JSON.stringify(doc)); } catch (e) {}
+  }
+  /* 无 PHP 模式的日常读写：全部落在本地镜像，语义与 api.php 一致 */
+  function localHandle(action, mod, path, body) {
+    body = body || {};
+    if (action === 'get') {
+      return Promise.resolve({ status: 200, body: { ok: true, data: getPathLocal(readLocMod(mod), path) } });
+    }
+    var doc = readLocMod(mod);
+    if (action === 'set') {
+      setPathLocal(doc, path, body.value);
+      writeLocMod(mod, doc);
+      return Promise.resolve({ status: 200, body: { ok: true, data: getPathLocal(doc, path) } });
+    }
+    if (action === 'save') {
+      var item = body.value;
+      if (item && typeof item === 'object' && !item.id) item.id = genId();
+      saveLocal(doc, path, item);
+      writeLocMod(mod, doc);
+      return Promise.resolve({ status: 200, body: { ok: true, data: item } });
+    }
+    if (action === 'remove') {
+      var removed = removeLocal(doc, path, body.id);
+      if (removed === null) return Promise.resolve({ status: 404, body: { ok: false, error: '未找到条目：' + body.id } });
+      writeLocMod(mod, doc);
+      return Promise.resolve({ status: 200, body: { ok: true, data: removed } });
+    }
+    if (action === 'reset') {
+      var d = ghDefaults(mod);
+      writeLocMod(mod, d);
+      return Promise.resolve({ status: 200, body: { ok: true, data: d } });
+    }
+    return Promise.resolve({ status: 400, body: { ok: false, error: '未知操作：' + action } });
+  }
+
+  /* --- GitHub Contents API：仅"上传/拉取备份"时使用 --- */
   function ghPutFile(rel, text, sha, message) {
-    var body = { message: message, content: ghB64Encode(text), branch: GH.branch || 'main' };
+    var r = ghRepo();
+    var body = { message: message, content: ghB64Encode(text), branch: r.branch || 'main' };
     if (sha) body.sha = sha;
-    return fetch(GH_API + '/repos/' + GH.owner + '/' + GH.repo + '/contents/' + rel, {
+    return fetch(GH_API + '/repos/' + r.owner + '/' + r.repo + '/contents/' + rel, {
       method: 'PUT',
       headers: Object.assign(ghHeaders(), { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body)
@@ -579,138 +630,78 @@
     });
   }
   function ghHttpError(status, fallback) {
+    var r = ghRepo();
     if (status === 401) return 'GitHub 令牌无效或未授权（401），请在设置页填写有效的 PAT';
     if (status === 403) return 'GitHub 拒绝访问（403），可能是令牌权限不足或触发限流';
-    if (status === 404) return '找不到仓库 ' + GH.owner + '/' + GH.repo + '（或令牌无权访问）';
+    if (status === 404) return '找不到仓库 ' + r.owner + '/' + r.repo + '（或令牌无权访问）';
     return fallback || ('GitHub 返回 HTTP ' + status);
   }
-  function ghReadMod(mod) {
-    var dir = GH.dir || 'data';
-    return ghGetFile(dir + '/' + mod + '.json').then(function (f) {
-      return ghGetFile(dir + '/' + mod + '.meta.json').then(function (m) {
-        var doc = (f.exists && f.text) ? ghParse(f.text) : null;
-        var rev = 0;
-        if (m.exists && m.text) { var mj = ghParse(m.text); if (mj && typeof mj.rev === 'number') rev = mj.rev; }
-        return { doc: (doc && typeof doc === 'object') ? doc : null, rev: rev, sha: f.sha, metaSha: m.sha };
-      });
-    });
-}
-  function ghDefaults(mod) {
-    if (BOOT.defaults && BOOT.defaults[mod] && typeof BOOT.defaults[mod] === 'object') {
-      return Promise.resolve(BOOT.defaults[mod]);
-    }
-    return fetch('modules/' + mod + '/default.json').then(function (res) {
-      if (!res.ok) return {};
-      return res.text().then(function (t) { var j = ghParse(t); return (j && typeof j === 'object') ? j : {}; });
-    }).catch(function () { return {}; });
+  /* 当前模块的完整文档：PHP 模式读服务器数据，无 PHP 模式读本地镜像 */
+  function readModDoc(id) {
+    if (ghEnabled()) return Promise.resolve(readLocMod(id));
+    return api.get(id);
   }
-  function ghDoc(mod) {
-    return ghReadMod(mod).then(function (r) {
-      if (r.doc) return r;
-      return ghDefaults(mod).then(function (d) { r.doc = d || {}; return r; });
-    });
+  function writeModDoc(id, doc) {
+    if (ghEnabled()) { writeLocMod(id, doc); return Promise.resolve(); }
+    return api.set(id, '', doc);
   }
-  function ghConflict(mod, rev) {
-    return ghDoc(mod).then(function (d) {
-      return { status: 409, rev: d.rev, body: { ok: false, error: '版本冲突', conflict: true, data: d.doc } };
-    });
-  }
-  function ghMutate(mod, baseRev, mutator) {
-    return ghReadMod(mod).then(function (r) {
-      if (baseRev !== null && baseRev !== undefined && baseRev !== r.rev) {
-        return ghConflict(mod, r.rev);
-      }
-      return (r.doc ? Promise.resolve(r.doc) : ghDefaults(mod)).then(function (doc) {
-        var result;
-        try { result = mutator(doc); }
-        catch (e) { if (e && e.status) return { status: e.status, body: { ok: false, error: e.message } }; throw e; }
-        return ghPutFile((GH.dir || 'data') + '/' + mod + '.json', JSON.stringify(doc, null, 2), r.sha, 'panel: set ' + mod).then(function (w) {
-          if (w.status === 409 || w.status === 422) return ghConflict(mod, r.rev);
-          if (w.status !== 200 && w.status !== 201) {
-            return { status: w.status, body: { ok: false, error: ghHttpError(w.status, 'GitHub 写入失败 HTTP ' + w.status) } };
-          }
-          var newRev = r.rev + 1;
-          ghCacheSave(mod, doc, newRev);
-          var metaRel = (GH.dir || 'data') + '/' + mod + '.meta.json';
-          return ghPutFile(metaRel, JSON.stringify({ rev: newRev, updatedAt: Date.now() }), r.metaSha, 'panel: rev ' + mod + ' -> ' + newRev)
-            .then(function () { return { status: 200, rev: newRev, body: { ok: true, data: result } }; });
-        });
-      });
-    });
-  }
-  function ghHandle(action, mod, path, body, method) {
-    body = body || {};
-    var baseRev = (body && typeof body.baseRev === 'number') ? body.baseRev : null;
-    if (action === 'get') {
-      return ghDoc(mod).then(function (r) {
-        return { status: 200, rev: r.rev, body: { ok: true, data: getPathLocal(r.doc, path) } };
-      });
-    }
-    if (action === 'set') {
-      return ghMutate(mod, baseRev, function (doc) { setPathLocal(doc, path, body.value); return getPathLocal(doc, path); });
-    }
-    if (action === 'save') {
-      return ghMutate(mod, baseRev, function (doc) {
-        var item = body.value;
-        if (item && typeof item === 'object' && !item.id) item.id = genId();
-        return saveLocal(doc, path, item);
-      });
-    }
-    if (action === 'remove') {
-      return ghMutate(mod, baseRev, function (doc) {
-        var removed = removeLocal(doc, path, body.id);
-        if (removed === null) { var e = new Error('未找到条目：' + body.id); e.status = 404; throw e; }
-        return removed;
-      });
-    }
-    if (action === 'reset') {
-      return ghDefaults(mod).then(function (d) {
-        return ghReadMod(mod).then(function (r) {
-          if (baseRev !== null && baseRev !== undefined && baseRev !== r.rev) return ghConflict(mod, r.rev);
-          return ghPutFile((GH.dir || 'data') + '/' + mod + '.json', JSON.stringify(d, null, 2), r.sha, 'panel: reset ' + mod).then(function (w) {
-            if (w.status !== 200 && w.status !== 201) {
-              return { status: w.status, body: { ok: false, error: ghHttpError(w.status, 'GitHub 写入失败 HTTP ' + w.status) } };
-            }
-            var nr = r.rev + 1;
-            ghCacheSave(mod, d, nr);
-            return ghPutFile((GH.dir || 'data') + '/' + mod + '.meta.json', JSON.stringify({ rev: nr, updatedAt: Date.now() }), r.metaSha, 'panel: rev ' + mod + ' -> ' + nr)
-              .then(function () { return { status: 200, rev: nr, body: { ok: true, data: d } }; });
+  /* 上传：把本端全部模块数据写入 GitHub data/<id>.json（覆盖云端旧副本） */
+  function ghPushAll() {
+    var r = ghRepo();
+    if (!ghToken()) return Promise.reject(new Error('请先在设置页填写 GitHub 令牌'));
+    var done = [];
+    return META.reduce(function (ch, m) {
+      return ch.then(function () {
+        return readModDoc(m.id).then(function (doc) {
+          return ghPutFile(r.dir + '/' + m.id + '.json', JSON.stringify(doc, null, 2), null, 'panel: 上传 ' + m.id).then(function (res) {
+            if (res.status === 200 || res.status === 201) { done.push(m.id); return m.id; }
+            throw new Error(ghHttpError(res.status, '上传 ' + m.id + ' 失败（HTTP ' + res.status + '）'));
           });
         });
       });
-    }
-    return Promise.resolve({ status: 400, body: { ok: false, error: '未知操作：' + action } });
+    }, Promise.resolve()).then(function () {
+      try { localStorage.setItem('panel.githubLastPush', String(Date.now())); } catch (e) {}
+      return { pushed: done };
+    });
   }
+  /* 拉取：从 GitHub 读回全部模块并覆盖本端本地数据 */
+  function ghPullAll() {
+    var r = ghRepo();
+    if (!ghToken()) return Promise.reject(new Error('请先在设置页填写 GitHub 令牌'));
+    var done = [], missing = [];
+    return META.reduce(function (ch, m) {
+      return ch.then(function () {
+        return ghGetFile(r.dir + '/' + m.id + '.json').then(function (f) {
+          if (!f.exists || !f.text) { missing.push(m.id); return; }
+          var doc = ghParse(f.text);
+          if (!doc || typeof doc !== 'object') { missing.push(m.id); return; }
+          return writeModDoc(m.id, doc).then(function () { done.push(m.id); });
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      var out = { pulled: done };
+      if (missing.length) out.missing = missing;
+      return out;
+    });
+  }
+  /* 无 PHP 模式的导出/导入：读/写本地镜像（离线可用） */
   function ghCustom(mod, action, opts) {
     opts = opts || {};
     if (action === 'export') {
-      return Promise.all(META.map(function (m) { return m.id; }).map(function (id) {
-        return ghDoc(id).then(function (r) { return [id, r.doc]; });
-      })).then(function (pairs) {
-        var out = { exportedAt: new Date().toISOString(), modules: {} };
-        pairs.forEach(function (p) { out.modules[p[0]] = p[1]; });
-        return { status: 200, body: { ok: true, data: out } };
-      });
+      var out = { exportedAt: new Date().toISOString(), modules: {} };
+      META.forEach(function (m) { out.modules[m.id] = readLocMod(m.id); });
+      return Promise.resolve({ status: 200, body: { ok: true, data: out } });
     }
     if (action === 'import') {
       var data = (opts.body && opts.body.data) || {};
-      var ids = Object.keys(data);
-      return ids.reduce(function (chain, id) {
-        return chain.then(function (acc) {
-          if (!metaMap.has(id) || !data[id] || typeof data[id] !== 'object') return acc;
-          return ghReadMod(id).then(function (r) {
-            return ghPutFile((GH.dir || 'data') + '/' + id + '.json', JSON.stringify(data[id], null, 2), r.sha, 'panel: import ' + id).then(function (w) {
-              if (w.status === 200 || w.status === 201) {
-                acc.push(id);
-                return ghPutFile((GH.dir || 'data') + '/' + id + '.meta.json', JSON.stringify({ rev: r.rev + 1, updatedAt: Date.now() }), r.metaSha, 'panel: rev ' + id);
-              }
-              return null;
-            });
-          }).then(function () { return acc; });
-        });
-      }, Promise.resolve([])).then(function (restored) {
-        return { status: 200, body: { ok: true, data: { restored: restored } } };
+      var restored = [];
+      Object.keys(data).forEach(function (id) {
+        if (metaMap.has(id) && data[id] && typeof data[id] === 'object') {
+          writeLocMod(id, data[id]);
+          restored.push(id);
+        }
       });
+      return Promise.resolve({ status: 200, body: { ok: true, data: { restored: restored } } });
     }
     return Promise.resolve({ status: 400, body: { ok: false, error: '未知操作：' + action } });
   }
@@ -1203,25 +1194,38 @@
         return { url: remoteUrl, token: remoteToken, revs: remoteRevs, dirty: Object.keys(dirtyMods) };
       }
     },
-    /** GitHub 后端（BOOT.backend.type==='github' 时启用）：配置 / 令牌 / 连通性自检 */
+    /** GitHub 备份（所有端）：令牌 / 仓库 / 上传 / 拉取（手动，不做实时同步） */
     github: {
-      available: ghEnabled,
+      available: function () { return true; },
+      mode: function () { return GH ? 'local' : 'php'; },
       config: function () {
-        return GH ? { owner: GH.owner, repo: GH.repo, branch: GH.branch || 'main', dir: GH.dir || 'data', token: ghToken() } : null;
+        var c = ghRepo();
+        return { owner: c.owner, repo: c.repo, branch: c.branch || 'main', dir: c.dir || 'data', token: ghToken() };
       },
+      repo: function () { var c = ghRepo(); return c.owner + '/' + c.repo; },
       token: ghToken,
       setToken: function (t) { try { localStorage.setItem(GH_TOKEN_KEY, String(t || '').trim()); } catch (e) {} },
       clearToken: function () { try { localStorage.removeItem(GH_TOKEN_KEY); } catch (e) {} },
-      repo: function () { return GH ? (GH.owner + '/' + GH.repo) : null; },
+      setRepo: function (cfg) {
+        cfg = cfg || {};
+        if (cfg.owner && cfg.repo) {
+          try { localStorage.setItem('panel.githubRepo', JSON.stringify(cfg)); } catch (e) {}
+        }
+      },
+      lastPush: function () {
+        try { return Number(localStorage.getItem('panel.githubLastPush')) || 0; } catch (e) { return 0; }
+      },
       test: function () {
-        if (!GH) return Promise.reject(new Error('未配置 GitHub 后端'));
-        return fetch(GH_API + '/repos/' + GH.owner + '/' + GH.repo, { headers: ghHeaders() }).then(function (res) {
+        var r = ghRepo();
+        return fetch(GH_API + '/repos/' + r.owner + '/' + r.repo, { headers: ghHeaders() }).then(function (res) {
           return res.json().catch(function () { return null; }).then(function (j) {
             if (res.status === 200) return { ok: true, private: !!(j && j.private), canWrite: !!(j && j.permissions && j.permissions.push) };
             throw new Error(ghHttpError(res.status));
           });
         });
-      }
+      },
+      push: ghPushAll,
+      pull: ghPullAll
     },
     ui: ui,
     util: util,

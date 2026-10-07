@@ -193,25 +193,75 @@
     dc.appendChild(resetRow);
     page.appendChild(dc);
 
-    /* ---------- GitHub 后端 ---------- */
+    /* ---------- GitHub 数据备份（所有端） ---------- */
     if (Panel.github.available()) page.appendChild(buildGitHubCard());
 
-/* ---------- GitHub 数据后端 ---------- */
+/* ---------- GitHub 数据同步（手动上传 / 拉取） ---------- */
   function buildGitHubCard() {
     var cfg = Panel.github.config() || {};
     var card = C('div', { class: 'card' });
     card.appendChild(C('div', { class: 'card-title' },
-      C('span', { text: 'GitHub 数据同步' }),
-      C('span', { class: 'sub', text: (cfg.owner ? cfg.owner + '/' + cfg.repo : '') + ' · 数据存于 ' + (cfg.dir || 'data') + '/' })));
+      C('span', { text: 'GitHub 数据备份' }),
+      C('span', { class: 'sub', text: '把本端数据上传保存 / 从云端拉取到本机（手动）' })));
 
     var fTok = C('input', { class: 'input', type: 'password', value: cfg.token || '', placeholder: 'GitHub Personal Access Token（PAT，需 repo 写权限）' });
-    var status = C('div', { class: 'set-tip', text: '令牌仅保存在本机浏览器，不会上传。' });
+    var status = C('div', { class: 'set-tip', text: '本端数据独立保存在设备上；GitHub 仅作为备份仓库（' + (cfg.owner || '') + '/' + (cfg.repo || '') + '@' + (cfg.branch || 'main') + '）。' });
 
-    function update(j) {
-      status.textContent = j.ok
-        ? '在线：' + (j.canWrite ? '可读写 ✓' : '只读（令牌缺 repo 写权限）') + ' · 仓库' + (j.private ? '私有' : '公开') + ' · ' + (cfg.owner || '') + '/' + (cfg.repo || '')
-        : j.error;
-      status.style.color = j.ok ? '' : '#e5484d';
+    function fmt(ts) {
+      if (!ts) return '从未上传';
+      var d = new Date(ts);
+      var p = function (n) { return (n < 10 ? '0' : '') + n; };
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    function pushBtn() {
+      return C('button', {
+        class: 'btn btn-primary btn-sm', type: 'button',
+        onclick: function () {
+          var btn = this;
+          Panel.ui.confirm('上传会将本机全部模块数据写入 GitHub 并覆盖云端旧副本，继续？', { okText: '上传' })
+            .then(function (ok) {
+              if (!ok) return;
+              btn.disabled = true; btn.textContent = '上传中…';
+              Panel.github.push().then(function (r) {
+                Panel.ui.toast('已上传 ' + r.pushed.length + ' 个模块到 GitHub', 'success');
+                status.textContent = '上次上传：' + fmt(Panel.github.lastPush());
+                btn.disabled = false; btn.textContent = '⬆ 上传到 GitHub';
+                render();
+              }).catch(function (e) {
+                status.textContent = e.message; status.style.color = '#e5484d';
+                Panel.ui.toast('上传失败：' + e.message, 'error');
+                btn.disabled = false; btn.textContent = '⬆ 上传到 GitHub';
+              });
+            });
+        }
+      }, '⬆ 上传到 GitHub');
+    }
+
+    function pullBtn() {
+      return C('button', {
+        class: 'btn btn-sm', type: 'button',
+        onclick: function () {
+          var btn = this;
+          Panel.ui.confirm('拉取会用 GitHub 上的数据覆盖本机当前数据（本机改动将丢失），确定继续？', { danger: true, okText: '拉取' })
+            .then(function (ok) {
+              if (!ok) return;
+              btn.disabled = true; btn.textContent = '拉取中…';
+              Panel.github.pull().then(function (r) {
+                var msg = '已从 GitHub 拉取 ' + r.pulled.length + ' 个模块并覆盖本机数据';
+                if (r.missing && r.missing.length) msg += '（云端无：' + r.missing.join('、') + '）';
+                Panel.ui.toast(msg, 'success');
+                btn.disabled = false; btn.textContent = '⬇ 从 GitHub 拉取';
+                render();
+                (r.pulled || []).forEach(function (id) { Panel.reload(id); });
+              }).catch(function (e) {
+                status.textContent = e.message; status.style.color = '#e5484d';
+                Panel.ui.toast('拉取失败：' + e.message, 'error');
+                btn.disabled = false; btn.textContent = '⬇ 从 GitHub 拉取';
+              });
+            });
+        }
+      }, '⬇ 从 GitHub 拉取');
     }
 
     card.appendChild(C('div', { class: 'set-grid' },
@@ -219,18 +269,18 @@
     card.appendChild(status);
     card.appendChild(C('div', { class: 'row', style: { marginTop: '12px' } },
       C('button', {
-        class: 'btn btn-primary btn-sm', type: 'button',
+        class: 'btn btn-sm', type: 'button',
         onclick: function () {
           Panel.github.setToken(fTok.value);
           var btn = this;
           btn.disabled = true; btn.textContent = '检测中…';
           Panel.github.test().then(function (j) {
-            update({ ok: true, canWrite: j.canWrite, private: j.private });
-            Panel.ui.toast('GitHub 连接成功', 'success');
+            status.textContent = '令牌有效：' + (j.canWrite ? '可读写 ✓' : '只读（缺 repo 写权限）') + ' · 仓库' + (j.private ? '私有' : '公开') + ' · ' + (cfg.owner || '') + '/' + (cfg.repo || '');
+            status.style.color = '';
+            Panel.ui.toast('GitHub 令牌有效', 'success');
             btn.disabled = false; btn.textContent = '保存并检测';
           }).catch(function (e) {
-            status.textContent = e.message;
-            status.style.color = '#e5484d';
+            status.textContent = e.message; status.style.color = '#e5484d';
             Panel.ui.toast('连接失败：' + e.message, 'error');
             btn.disabled = false; btn.textContent = '保存并检测';
           });
@@ -241,16 +291,18 @@
         onclick: function () {
           Panel.github.clearToken();
           fTok.value = '';
-          status.textContent = '已清除本地令牌。';
-          status.style.color = '';
+          status.textContent = '已清除本地令牌。'; status.style.color = '';
           Panel.ui.toast('已清除 GitHub 令牌', 'success');
         }
       }, '清除令牌')));
+    card.appendChild(C('div', { class: 'row', style: { marginTop: '12px' } },
+      pushBtn(), pullBtn()));
+    card.appendChild(C('div', { class: 'set-tip', style: { color: 'var(--text-dim, #909399)' }, text: '上次上传：' + fmt(Panel.github.lastPush()) }));
     return card;
   }
 
-  /* ---------- 云端同步 ---------- */
-    page.appendChild(buildSyncCard());
+  /* ---------- 云端同步（仅本地 PHP 服务器模式） ---------- */
+    if (Panel.github.mode() === 'php') page.appendChild(buildSyncCard());
 
     /* ---------- 扩展接口 ---------- */
     page.appendChild(buildDevCard());
