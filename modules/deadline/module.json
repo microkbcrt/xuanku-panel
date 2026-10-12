@@ -1,0 +1,9 @@
+{
+  "id": "deadline",
+  "name": "死线",
+  "icon": "warn",
+  "order": 6,
+  "description": "带截止期限的任务，红色倒计时警告",
+  "js": "module.js",
+  "css": "module.css"
+}

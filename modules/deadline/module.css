@@ -1,0 +1,82 @@
+/* 死线模块样式：红色倒计时警告线（通用组件见 main.css） */
+
+.dl-add { display: grid; grid-template-columns: 1.6fr 1fr auto; gap: 8px; margin-top: 12px; }
+.dl-add .input { min-width: 0; }
+
+.dl-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+.dl-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--input-bg);
+  border: 1px solid transparent;
+  animation: dlIn .28s var(--ease-out) both;
+}
+@keyframes dlIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.dl-item.is-done { opacity: .55; }
+.dl-item.dl-hot, .dl-item.dl-over { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+
+.dl-check {
+  flex: none; width: 24px; height: 24px; margin-top: 2px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  background: transparent; color: transparent; cursor: pointer;
+  display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast) var(--ease-out);
+}
+.dl-check:hover { transform: scale(1.08); }
+.is-done .dl-check { background: var(--ok); border-color: transparent; color: #fff; }
+
+.dl-main { flex: 1; min-width: 0; cursor: pointer; }
+.dl-head { display: flex; align-items: baseline; gap: 10px; justify-content: space-between; }
+.dl-title { font-size: 14.5px; font-weight: 600; line-height: 1.4; word-break: break-word; }
+.is-done .dl-title { text-decoration: line-through; opacity: .45; }
+
+.dl-count { font-weight: 700; font-size: 13px; letter-spacing: .3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.dl-dead-bar {
+  margin: 8px 0 6px; height: 8px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+.dl-dead-bar i { display: block; height: 100%; border-radius: 999px; transition: width .3s var(--ease-out), background .3s; }
+.is-done .dl-dead-bar i { width: 100% !important; background: color-mix(in srgb, var(--text) 22%, transparent); }
+
+.dl-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+.dl-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-tag {
+  font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+  color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.dl-actions { display: flex; gap: 6px; opacity: .35; transition: opacity var(--t-fast); }
+.dl-item:hover .dl-actions { opacity: 1; }
+
+.dl-danger { color: var(--danger); }
+
+/* 生死线等级配色（越接近死线越红越满，并脉冲闪烁） */
+.dl-ok .dl-dead-bar i { background: var(--ok); }
+.dl-ok .dl-count { color: var(--muted); }
+.dl-ok .dl-tag { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+
+.dl-soon .dl-dead-bar i { background: var(--warn); }
+.dl-soon .dl-count { color: var(--warn); }
+.dl-soon .dl-tag { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+.dl-warn .dl-dead-bar i { background: color-mix(in srgb, var(--danger) 78%, var(--warn)); }
+.dl-warn .dl-count { color: color-mix(in srgb, var(--danger) 72%, var(--warn)); }
+
+.dl-hot .dl-dead-bar i { background: var(--danger); animation: dlPulse 1.2s var(--t-fast) infinite; }
+.dl-hot .dl-count { color: var(--danger); animation: dlPulse 1.2s var(--t-fast) infinite; }
+
+.dl-over .dl-dead-bar i { background: #D21B1B; box-shadow: 0 0 10px rgba(255, 45, 45, .65); animation: dlPulse .8s var(--t-fast) infinite; }
+.dl-over .dl-count { color: #FF3B3B; animation: dlPulse .8s var(--t-fast) infinite; }
+.dl-over .dl-dead-bar { background: color-mix(in srgb, #D21B1B 30%, transparent); }
+.dl-over .dl-title { color: var(--danger); }
+
+@keyframes dlPulse { 50% { opacity: .4; } }
+
+@media (max-width: 640px) {
+  .dl-actions { opacity: .8; }
+  .dl-add { grid-template-columns: 1fr; }
+  .dl-item { gap: 10px; padding: 11px 10px; }
+  .dl-count { font-size: 12px; }
+}

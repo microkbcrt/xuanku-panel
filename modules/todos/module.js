@@ -64,7 +64,10 @@
 
     var card = C('div', { class: 'card' });
     card.appendChild(C('div', { class: 'card-title' },
-      C('span', {}, '待办清单'),
+      C('div', {},
+        C('span', {}, '待办清单'),
+        C('span', { class: 'sub', text: '日常清单 · 不设紧迫' })),
+      C('button', { class: 'chip', type: 'button', title: '有截止时间的紧迫任务请用「死线」模块', onclick: function () { Panel.navigate('deadline'); } }, '去死线'),
       C('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: function () { editTodo(null); } }, Panel.icon('plus'), '新建待办')));
 
     card.appendChild(C('div', { class: 'row', style: { marginBottom: '12px' } },
@@ -86,7 +89,7 @@
       card.appendChild(Panel.ui.empty(
         filter === 'done' ? 'list' : 'check',
         filter === 'active' ? '没有进行中的待办' : filter === 'done' ? '还没有完成记录' : '清单是空的',
-        '点右上角「新建待办」添加第一条'));
+        '点「新建待办」添加；有截止日期的急事请用「死线」'));
     } else {
       var box = C('div', { class: 'todo-list' });
       items.forEach(function (t) { box.appendChild(todoItem(t)); });

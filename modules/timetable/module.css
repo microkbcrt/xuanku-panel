@@ -75,11 +75,30 @@
 }
 .kb-day.is-today b, .kb-day.is-today span { color: var(--on-tertiary); }
 
+/* ---- 调休补课 / 放假 ---- */
+.kb-day .kb-badge {
+  font-size: 9px; font-weight: 700; line-height: 1.5; max-width: 100%;
+  padding: 0 6px; border-radius: 999px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--brand1) 16%, transparent);
+  color: var(--brand1);
+}
+.kb-day .kb-badge-off { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.kb-day .kb-badge-rev { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.kb-day.is-today .kb-badge { color: var(--brand1); }
+.kb-day.is-today .kb-badge-off { color: var(--ok); }
+.kb-day.is-today .kb-badge-rev { color: var(--warn); }
+.kb-day.is-override { border-color: color-mix(in srgb, var(--brand1) 32%, transparent); }
+.kb-day.is-override.is-off { border-color: color-mix(in srgb, var(--ok) 42%, transparent); }
+.kb-day.is-override.is-today { border-color: transparent; }
+
 .kb-cell {
   border-radius: 11px; background: var(--panel-2); opacity: .55;
 }
 .kb-cell.is-today { background: color-mix(in srgb, var(--brand1) 8%, var(--panel-2)); opacity: 1; }
 .kb-cell.is-now { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand1) 45%, transparent); }
+.kb-cell.is-override { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand1) 24%, transparent); opacity: .8; }
+.kb-cell.is-override.is-off { box-shadow: none; opacity: .3; }
 
 /* ---- 课程卡片 ---- */
 .kb-course {
@@ -103,6 +122,7 @@
   white-space: normal; overflow-wrap: anywhere;
 }
 .kb-course-sub { font-size: 9.5px; opacity: .82; }
+.kb-course-hint { font-style: italic; opacity: .72; }
 
 .kb-extra {
   font-size: 12px; color: var(--warn);
@@ -160,6 +180,7 @@
   .kb-day { gap: 0; }
   .kb-day b { font-size: 11px; }
   .kb-day span { font-size: 8.5px; }
+  .kb-day .kb-badge { font-size: 7.5px; padding: 0 4px; }
   .kb-week-text { min-width: 92px; }
   .kb-week-text b { font-size: 15px; }
   .kb-bar { padding: 11px 12px; }
@@ -169,3 +190,12 @@
   .kb-course-sub { display: none; }
   .kb-extra-note { margin-left: 0; width: 100%; }
 }
+
+/* ---- 左右滑动切周（跟手拖动 / 松手滑出、回弹 / 新周滑入） ---- */
+.kb-grid { touch-action: pan-y; cursor: grab; }
+.kb-grid.kb-dragging { cursor: grabbing; }
+.kb-grid.kb-drag-anime { transition: transform .16s ease; }
+@keyframes kb-in-next { from { transform: translateX(42%); opacity: .25; } to { transform: none; opacity: 1; } }
+@keyframes kb-in-prev { from { transform: translateX(-42%); opacity: .25; } to { transform: none; opacity: 1; } }
+.kb-grid.kb-in-next { animation: kb-in-next .22s ease both; }
+.kb-grid.kb-in-prev { animation: kb-in-prev .22s ease both; }

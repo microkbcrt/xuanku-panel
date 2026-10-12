@@ -15,6 +15,16 @@
 .set-period-row .input { padding: 6px 8px; font-size: 13px; }
 .set-period-row span { color: var(--muted); }
 
+.set-swap-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.set-swap-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 14px; background: var(--panel-2);
+  font-size: 13px;
+  animation: setSwapIn .24s var(--ease-out) both;
+}
+@keyframes setSwapIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.set-swap-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
 .accent-dot {
   width: 13px; height: 13px; border-radius: 50%; display: inline-block;
   border: 1px solid rgba(255, 255, 255, .35);

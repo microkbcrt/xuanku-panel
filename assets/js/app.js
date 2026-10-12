@@ -8,6 +8,7 @@
   'use strict';
 
   var BOOT = window.__PANEL__ || { modules: [], default: '' };
+  window.BOOT = BOOT;
   var META = Array.isArray(BOOT.modules) ? BOOT.modules : [];
   var metaMap = new Map(META.map(function (m) { return [m.id, m]; }));
 
@@ -144,6 +145,85 @@
         var a = arguments, self = this;
         clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms || 200);
       };
+    },
+    /* 未提交编辑的草稿（sessionStorage）：页面被系统回收/意外刷新后仍可恢复输入内容 */
+    draft: {
+      get: function (key) {
+        try { var s = sessionStorage.getItem('panel.draft.' + key); return s ? JSON.parse(s) : null; }
+        catch (e) { return null; }
+      },
+      set: function (key, obj) {
+        try { sessionStorage.setItem('panel.draft.' + key, JSON.stringify(obj)); } catch (e) {}
+      },
+      clear: function (key) {
+        try { sessionStorage.removeItem('panel.draft.' + key); } catch (e) {}
+      }
+    },
+    /* 健壮定时器：立即执行一次，之后按间隔执行；页面重新可见 / 窗口获得焦点时立即补跑一次。
+       避免手机锁屏、电脑休眠、后台标签页节流导致时钟停顿、倒计时不准。返回停止函数。 */
+    ticker: function (fn, ms) {
+      var stopped = false;
+      function run() {
+        if (stopped) return;
+        try { fn(); } catch (e) { if (window.console) console.error(e); }
+      }
+      run();
+      var id = setInterval(run, ms);
+      function onVisible() { if (document.visibilityState === 'hidden') return; run(); }
+      document.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', run);
+      window.addEventListener('pageshow', run);
+      return function () {
+        stopped = true;
+        clearInterval(id);
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('focus', run);
+        window.removeEventListener('pageshow', run);
+      };
+    },
+    /* 导出文件：原生端(Android WebView 不支持 a[download])写入缓存并调起系统分享，浏览器端直接下载。
+       原生分支任何失败都 toast 报错，绝不静默落回浏览器方式 */
+    saveFile: function (name, text, mime) {
+      var cap = window.Capacitor;
+      var isNative = cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform();
+      if (isNative) {
+        return Promise.resolve().then(function () {
+          if (typeof cap.nativePromise !== 'function') {
+            throw new Error('Capacitor 桥未就绪 (nativePromise 缺失)');
+          }
+          var bytes = new TextEncoder().encode(text);
+          var bin = '';
+          for (var i = 0; i < bytes.length; i += 32768) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+          }
+          /* 原生桥直调：window.Capacitor.nativePromise 是 bridge 注入的分发原语，
+             与 registerPlugin 内部 rtype:'promise' 路径完全一致，无需加载 @capacitor/core */
+          return cap.nativePromise('Filesystem', 'writeFile', {
+            path: name, data: btoa(bin), directory: 'CACHE'
+          }).then(function (res) {
+            /* Share.files 是 file:// URL 字符串数组（非对象），原生按 (String) 强转 */
+            return cap.nativePromise('Share', 'share', {
+              title: name,
+              dialogTitle: name,
+              files: [res && res.uri]
+            });
+          });
+        }).catch(function (e) {
+          var msg = (e && e.message) || String(e || '');
+          if (/cancel/i.test(msg)) return;
+          try { Panel.ui.toast('导出失败：' + msg, 'error'); } catch (e2) {}
+        });
+      }
+      var blob = new Blob([text], { type: mime || 'application/octet-stream' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      return Promise.resolve();
     }
   };
 
@@ -550,20 +630,8 @@
     var r = ghRepo();
     return '/repos/' + r.owner + '/' + r.repo + '/contents/' + rel + '?ref=' + (r.branch || 'main');
   }
-  function ghGetFile(rel) {
-    return fetch(GH_API + ghContentsPath(rel), { headers: ghHeaders() }).then(function (res) {
-      return res.text().then(function (txt) {
-        if (res.status === 200) {
-          var j = ghParse(txt);
-          if (j && j.type === 'file' && j.content) {
-            return { exists: true, text: ghB64Decode(j.content), sha: j.sha };
-          }
-          return { exists: false, sha: null };
-        }
-        return { exists: false, sha: null, status: res.status };
-      });
-    }).catch(function () { return { exists: false, sha: null, offline: true }; });
-  }
+  function ghGetFile(rel) { return ghGetFileTo(ghRepo(), rel); }
+
   /* --- 本地数据镜像（无 PHP 模式）：每端独立、离线可用 --- */
   var LOCAL_PREFIX = 'panel.local.';
   function localClone(o) { return (o && typeof o === 'object') ? JSON.parse(JSON.stringify(o)) : {}; }
@@ -617,8 +685,7 @@
   }
 
   /* --- GitHub Contents API：仅"上传/拉取备份"时使用 --- */
-  function ghPutFile(rel, text, sha, message) {
-    var r = ghRepo();
+  function ghPutFileTo(r, rel, text, sha, message) {
     var body = { message: message, content: ghB64Encode(text), branch: r.branch || 'main' };
     if (sha) body.sha = sha;
     return fetch(GH_API + '/repos/' + r.owner + '/' + r.repo + '/contents/' + rel, {
@@ -629,12 +696,64 @@
       return res.text().then(function (txt) { return { status: res.status, data: ghParse(txt) }; });
     });
   }
+  function ghGetFileTo(r, rel) {
+    return fetch(GH_API + '/repos/' + r.owner + '/' + r.repo + '/contents/' + rel + '?ref=' + (r.branch || 'main'), { headers: ghHeaders() }).then(function (res) {
+      return res.text().then(function (txt) {
+        if (res.status === 200) {
+          var j = ghParse(txt);
+          if (j && j.type === 'file' && j.content) {
+            return { exists: true, text: ghB64Decode(j.content), sha: j.sha };
+          }
+          return { exists: false, sha: null };
+        }
+        return { exists: false, sha: null, status: res.status };
+      });
+    }).catch(function () { return { exists: false, sha: null, offline: true }; });
+  }
+  function ghPutFile(rel, text, sha, message) { return ghPutFileTo(ghRepo(), rel, text, sha, message); }
+  /* 上传已存在的文件需带 sha，否则 GitHub 返回 422：失败后取回 sha 再重试一次 */
+  function ghPutSmartTo(r, rel, text, message) {
+    return ghPutFileTo(r, rel, text, null, message).then(function (res) {
+      if (res.status !== 422) return res;
+      return ghGetFileTo(r, rel).then(function (g) {
+        return (g && g.exists && g.sha) ? ghPutFileTo(r, rel, text, g.sha, message) : res;
+      });
+    });
+  }
+  function ghPutSmart(rel, text, message) { return ghPutSmartTo(ghRepo(), rel, text, message); }
   function ghHttpError(status, fallback) {
     var r = ghRepo();
     if (status === 401) return 'GitHub 令牌无效或未授权（401），请在设置页填写有效的 PAT';
     if (status === 403) return 'GitHub 拒绝访问（403），可能是令牌权限不足或触发限流';
     if (status === 404) return '找不到仓库 ' + r.owner + '/' + r.repo + '（或令牌无权访问）';
     return fallback || ('GitHub 返回 HTTP ' + status);
+  }
+  /* --- 同步标记：push/pull 后记录各模块内容指纹，供启动自动检查用 ---
+   * 云端 <dir>/meta.json = { app, pushedAt, hashes }；
+   * 本端 panel.pushedHashes = 上次 push/pull 完成时的模块内容指纹（FNV-1a），
+   * panel.ghSyncMark = 已对账的云端 pushedAt。
+   * 三端独立 + 手动上传的纪律下：启动时若云端比已对账状态新，
+   * 本端与云端指纹全部一致 → 静默对齐；存在差异 → 弹窗由用户裁决，
+   * 绝不静默覆盖本端未上传的修改。 */
+  function ghHash(text) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+  function ghSyncMark() { try { return Number(localStorage.getItem('panel.ghSyncMark')) || 0; } catch (e) { return 0; } }
+  function ghSetSyncMark(v) { try { localStorage.setItem('panel.ghSyncMark', String(v)); } catch (e) {} }
+  function ghStoreHashes(hashes) { try { localStorage.setItem('panel.pushedHashes', JSON.stringify(hashes || {})); } catch (e) {} }
+  function ghLocalHashes() {
+    return Promise.all(META.map(function (m) {
+      return Promise.resolve(readModDoc(m.id)).then(function (d) { return [m.id, ghHash(JSON.stringify(d))]; });
+    })).then(function (pairs) {
+      var out = {};
+      pairs.forEach(function (p) { out[p[0]] = p[1]; });
+      return out;
+    });
   }
   /* 当前模块的完整文档：PHP 模式读服务器数据，无 PHP 模式读本地镜像 */
   function readModDoc(id) {
@@ -645,22 +764,29 @@
     if (ghEnabled()) { writeLocMod(id, doc); return Promise.resolve(); }
     return api.set(id, '', doc);
   }
-  /* 上传：把本端全部模块数据写入 GitHub data/<id>.json（覆盖云端旧副本） */
+  /* 上传：把本端全部模块数据写入 GitHub data/<id>.json（覆盖云端旧副本），
+   * 最后写 <dir>/meta.json（pushedAt + 内容指纹）供各端启动时自动检查 */
   function ghPushAll() {
     var r = ghRepo();
     if (!ghToken()) return Promise.reject(new Error('请先在设置页填写 GitHub 令牌'));
-    var done = [];
+    var done = [], hashes = {};
     return META.reduce(function (ch, m) {
       return ch.then(function () {
         return readModDoc(m.id).then(function (doc) {
-          return ghPutFile(r.dir + '/' + m.id + '.json', JSON.stringify(doc, null, 2), null, 'panel: 上传 ' + m.id).then(function (res) {
+          hashes[m.id] = ghHash(JSON.stringify(doc));
+          return ghPutSmart(r.dir + '/' + m.id + '.json', JSON.stringify(doc, null, 2), 'panel: 上传 ' + m.id).then(function (res) {
             if (res.status === 200 || res.status === 201) { done.push(m.id); return m.id; }
             throw new Error(ghHttpError(res.status, '上传 ' + m.id + ' 失败（HTTP ' + res.status + '）'));
           });
         });
       });
     }, Promise.resolve()).then(function () {
-      try { localStorage.setItem('panel.githubLastPush', String(Date.now())); } catch (e) {}
+      var pushedAt = Date.now();
+      try { localStorage.setItem('panel.githubLastPush', String(pushedAt)); } catch (e) {}
+      ghStoreHashes(hashes);
+      ghSetSyncMark(pushedAt);
+      ghPutSmart(r.dir + '/meta.json', JSON.stringify({ app: 'xuanku-panel', pushedAt: pushedAt, hashes: hashes }, null, 2), 'panel: 同步标记')
+        .catch(function () { /* 标记失败不影响数据上传 */ });
       return { pushed: done };
     });
   }
@@ -679,9 +805,13 @@
         });
       });
     }, Promise.resolve()).then(function () {
-      var out = { pulled: done };
-      if (missing.length) out.missing = missing;
-      return out;
+      return ghLocalHashes().then(function (hashes) {
+        ghStoreHashes(hashes);
+        ghSetSyncMark(Date.now());
+        var out = { pulled: done };
+        if (missing.length) out.missing = missing;
+        return out;
+      });
     });
   }
   /* 无 PHP 模式的导出/导入：读/写本地镜像（离线可用） */
@@ -706,13 +836,86 @@
     return Promise.resolve({ status: 400, body: { ok: false, error: '未知操作：' + action } });
   }
 
+  /* --- 启动自动同步检查（仅无 PHP 模式）：启动 3s 后取一次云端 meta.json，
+   * 云端比已对账状态新 → 本端指纹与云端一致则静默对齐（本来就没差异），
+   * 存在差异则弹窗让人选「拉取云端 / 上传本端 / 暂不处理」，绝不静默覆盖本端。
+   * 只读公共站（BOOT.readOnly）与未配置令牌的端自动跳过。 */
+  var GH_SYNC_TOL = 60 * 1000;
+  function ghAutoSync() {
+    if (!ghEnabled() || BOOT.readOnly || !ghToken()) return Promise.resolve({ skipped: 'disabled' });
+    if (ui.hasOpenModal()) return Promise.resolve({ skipped: 'modal' });
+    var r = ghRepo();
+    return ghGetFileTo(r, r.dir + '/meta.json').then(function (f) {
+      if (!f || !f.exists || !f.text) return { skipped: 'no-meta' };
+      var meta = ghParse(f.text);
+      if (!meta || !(meta.pushedAt > 0) || !meta.hashes) return { skipped: 'bad-meta' };
+      if (meta.pushedAt <= ghSyncMark() + GH_SYNC_TOL) return { skipped: 'fresh' };
+      return ghLocalHashes().then(function (local) {
+        var diff = META.filter(function (m) { return local[m.id] !== meta.hashes[m.id]; })
+          .map(function (m) { return m.name || m.id; });
+        if (!diff.length) {
+          ghSetSyncMark(meta.pushedAt);
+          return { skipped: 'in-sync' };
+        }
+        var when = new Date(meta.pushedAt).toLocaleString();
+        ui.modal({
+          title: '检测到云端数据更新',
+          body: function () {
+            return el('div', { class: 'confirm-text' },
+              el('p', { text: 'GitHub 仓库于 ' + when + ' 有新推送，以下模块与本端数据不一致：' }),
+              el('p', { style: { color: 'var(--text-dim, #909399)' }, text: diff.join('、') }),
+              el('p', { text: '「拉取云端」将用云端数据覆盖本端这些模块（本端未上传的修改会丢失）；「上传本端」将以本端数据覆盖云端。' }));
+          },
+          actions: [
+            { label: '拉取云端', class: 'btn-primary', onClick: function () {
+              return ghPullAll().then(function (out) {
+                ui.toast('已从云端拉取 ' + (out.pulled || []).length + ' 个模块', 'success');
+              }, function (e) { ui.toast('拉取失败：' + ((e && e.message) || e), 'error'); });
+            } },
+            { label: '上传本端', onClick: function () {
+              return ghPushAll().then(function (out) {
+                ui.toast('已上传 ' + (out.pushed || []).length + ' 个模块到 GitHub', 'success');
+              }, function (e) { ui.toast('上传失败：' + ((e && e.message) || e), 'error'); });
+            } },
+            { label: '暂不处理' }
+          ]
+        });
+        return { prompted: true, diff: diff };
+      });
+    }).catch(function () { return { skipped: 'error' }; });
+  }
+
+  /* 公共只读站：模块首次 get 时拉取 backend.dataUrls[mod] 覆盖本地镜像，
+   * 同学端刷新即见最新发布数据；拉取失败（离线/部署前）回落本地镜像与内嵌默认值。 */
+  var dataUrlFetched = {};
+  function fetchPublicData(mod) {
+    var urls = (BOOT.backend && BOOT.backend.dataUrls) || {};
+    var url = urls[mod];
+    if (!url || dataUrlFetched[mod]) return Promise.resolve(false);
+    dataUrlFetched[mod] = true;
+    return fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now(), { cache: 'no-store' })
+      .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+      .then(function (doc) {
+        if (doc && typeof doc === 'object' && !Array.isArray(doc) && Object.keys(doc).length) {
+          writeLocMod(mod, doc);
+          return true;
+        }
+        return false;
+      })
+      .catch(function () { return false; });
+  }
+
   var api = {
     get: function (mod, path) {
-      return http('get', mod, path || '').then(function (r) {
-        var data = interpret(r, mod);
-        if (!path && data && typeof data === 'object') writeCache(mod, data);
-        if (queue.length) setTimeout(flushQueue, 0);
-        return data;
+      var warm = (path === '' || !path) && (BOOT.backend && BOOT.backend.dataUrls || {})[mod]
+        ? fetchPublicData(mod) : Promise.resolve(false);
+      return warm.then(function () {
+        return http('get', mod, path || '').then(function (r) {
+          var data = interpret(r, mod);
+          if (!path && data && typeof data === 'object') writeCache(mod, data);
+          if (queue.length) setTimeout(flushQueue, 0);
+          return data;
+        });
       }).catch(function (err) {
         if (isOffline(err)) {
           var cached = readCache(mod);
@@ -763,6 +966,9 @@
   var ui = {
     el: el,
     $: $,
+
+    /* 是否有弹窗（含编辑表单）打开：用于避免后台自动刷新覆盖正在编辑的内容 */
+    hasOpenModal: function () { return modalStack.length > 0; },
 
     toast: function (msg, type) {
       var t = el('div', { class: 'toast ' + (type || 'info') },
@@ -876,9 +1082,11 @@
       return el('div', { class: 'progress' }, el('i', { style: { width: p.toFixed(1) + '%' } }));
     },
 
-    /** 表单弹窗：fields = [{name,label,type,value,required,placeholder,options,min,max,step,rows}] */
+    /** 表单弹窗：fields = [{name,label,type,value,required,placeholder,options,min,max,step,rows}]
+        opt.draftKey 可选：开启草稿保护，意外刷新/被系统回收后可恢复未提交内容 */
     form: function (opt) {
-      var values = {};
+      var draftKey = opt.draftKey ? String(opt.draftKey) : null;
+      var restored = draftKey ? util.draft.get(draftKey) : null;
       var wrap = el('div', { class: 'form-grid' });
       (opt.fields || []).forEach(function (f) {
         var input;
@@ -898,10 +1106,29 @@
           });
         }
         var initial = f.value !== undefined && f.value !== null ? String(f.value) : '';
+        if (restored && restored[f.name] !== undefined && restored[f.name] !== null) {
+          initial = String(restored[f.name]);
+        }
         input.value = initial;
         wrap.appendChild(el('div', { class: 'field' },
           el('label', {}, f.label + (f.required ? ' *' : '')), input));
       });
+
+      function readFields() {
+        var raw = {}, data = {};
+        (opt.fields || []).forEach(function (f) {
+          var node = wrap.querySelector('[name="' + f.name + '"]');
+          var v = node ? String(node.value || '').trim() : '';
+          raw[f.name] = v;
+          data[f.name] = f.type === 'number' ? (v === '' ? null : Number(v)) : v;
+        });
+        return { raw: raw, data: data };
+      }
+      if (draftKey) {
+        var persist = function () { util.draft.set(draftKey, readFields().data); };
+        wrap.addEventListener('input', persist);
+        wrap.addEventListener('change', persist);
+      }
 
       var errorLine = el('div', { class: 'form-error', style: { display: 'none' } });
       var baseActions = (opt.actions && opt.actions.length)
@@ -911,18 +1138,17 @@
       var m = ui.modal({
         title: opt.title || '编辑',
         body: [wrap, errorLine],
+        onClose: function () { if (draftKey) util.draft.clear(draftKey); },
         actions: baseActions.concat([{
           label: '保存',
           class: 'btn-primary',
           closeOnClick: false,
           onClick: function (close) {
-            var data = {};
+            var parsed = readFields();
+            var data = parsed.data;
             var invalid = null;
             (opt.fields || []).forEach(function (f) {
-              var node = wrap.querySelector('[name="' + f.name + '"]');
-              var v = node ? String(node.value || '').trim() : '';
-              if (f.required && !v && !invalid) invalid = f.label;
-              data[f.name] = f.type === 'number' ? (v === '' ? null : Number(v)) : v;
+              if (f.required && !parsed.raw[f.name] && !invalid) invalid = f.label;
             });
             if (invalid) {
               errorLine.style.display = '';
@@ -945,6 +1171,7 @@
           }
         }])
       });
+      if (restored) ui.toast('已恢复上次未保存的编辑', 'info');
       return m;
     }
   };
@@ -961,12 +1188,12 @@
       if (meta.css && !document.querySelector('link[data-mod-css="' + id + '"]')) {
         var link = document.createElement('link');
         link.rel = 'stylesheet';
-        link.href = 'modules/' + id + '/' + meta.css;
+        link.href = 'modules/' + id + '/' + meta.css + '?_=' + Date.now();
         link.dataset.modCss = id;
         document.head.appendChild(link);
       }
       var script = document.createElement('script');
-      script.src = 'modules/' + id + '/' + meta.js;
+      script.src = 'modules/' + id + '/' + meta.js + '?_=' + Date.now();
       script.dataset.modJs = id;
       script.onload = function () {
         if (registry.has(id)) resolve(registry.get(id));
@@ -1108,8 +1335,8 @@
       time.textContent = util.pad(d.getHours()) + ':' + util.pad(d.getMinutes()) + ':' + util.pad(d.getSeconds());
       date.textContent = (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + week[d.getDay()];
     }
-    tick();
-    setInterval(tick, 1000);
+    /* 用 ticker：锁屏/休眠/后台节流后，切回前台立即校准，避免时钟停顿 */
+    util.ticker(tick, 1000);
   }
 
   function buildTheme() {
@@ -1163,6 +1390,9 @@
     window.addEventListener('online', function () { syncAfterFlush(); });
     if (queue.length) setTimeout(syncAfterFlush, 800);
     else if (remoteUrl) setTimeout(syncRemote, 1800);
+
+    // 无 PHP 模式：启动后自动检查云端是否有新备份（有差异会弹窗，不会静默覆盖）
+    if (GH && !BOOT.readOnly) setTimeout(ghAutoSync, 3000);
   }
 
   /* ---------------- 对外接口 ---------------- */
@@ -1225,7 +1455,19 @@
         });
       },
       push: ghPushAll,
-      pull: ghPullAll
+      pull: ghPullAll,
+      /** 启动自动同步检查（同一次入口，可手动触发；仅无 PHP 模式生效） */
+      checkRemote: ghAutoSync,
+      /** 发布任意文本到指定仓库文件（公共课表等）：需已保存的 PAT 有该仓库写权限 */
+      putTo: function (owner, repo, branch, rel, text, message) {
+        if (!owner || !repo || !rel) return Promise.reject(new Error('putTo 缺少仓库或文件路径'));
+        if (!ghToken()) return Promise.reject(new Error('请先在设置页填写 GitHub 令牌'));
+        var r = { owner: owner, repo: repo, branch: branch || 'main' };
+        return ghPutSmartTo(r, rel, text, message || 'panel: 发布数据').then(function (res) {
+          if (res.status === 200 || res.status === 201) return res.data;
+          throw new Error(ghHttpError(res.status, '发布失败（HTTP ' + res.status + '）'));
+        });
+      }
     },
     ui: ui,
     util: util,

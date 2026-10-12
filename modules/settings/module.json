@@ -2,7 +2,7 @@
   "id": "settings",
   "name": "设置",
   "icon": "gear",
-  "order": 6,
+  "order": 7,
   "description": "扩展中心",
   "js": "module.js",
   "css": "module.css",

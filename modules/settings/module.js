@@ -7,6 +7,7 @@
   var host = null, ctx = null;
   var tt = null;      // 课表模块文档（个人信息 / 学期 / 作息）
   var theme = 'light', accent = 'aurora';
+  var periodsRestoreToastShown = false;
   var DATA_IDS = ['todos', 'pomodoro', 'run', 'chaoxing', 'timetable'];
 
   var ACCENTS = [
@@ -69,13 +70,25 @@
 
     var table = C('div', { class: 'set-periods' });
     var inputs = [];
+    /* 草稿保护：正在调整作息时若页面被意外刷新/回收，重新打开设置仍能恢复未保存的时间 */
+    var pDraft = Panel.util.draft.get('timetable.periods');
     (s.periods || []).forEach(function (p, i) {
-      var st = C('input', { class: 'input', type: 'time', value: p.start });
-      var en = C('input', { class: 'input', type: 'time', value: p.end });
+      var dv = (pDraft && pDraft[i]) ? pDraft[i] : null;
+      var st = C('input', { class: 'input', type: 'time', value: (dv && dv.start) || p.start });
+      var en = C('input', { class: 'input', type: 'time', value: (dv && dv.end) || p.end });
       inputs.push({ st: st, en: en });
       table.appendChild(C('div', { class: 'set-period-row' },
         C('b', { text: '第 ' + p.n + ' 节' }), st, C('span', { text: '—' }), en));
     });
+    table.addEventListener('input', function () {
+      Panel.util.draft.set('timetable.periods', inputs.map(function (x, i) {
+        return { n: i + 1, start: x.st.value, end: x.en.value };
+      }));
+    });
+    if (pDraft && !periodsRestoreToastShown) {
+      periodsRestoreToastShown = true;
+      Panel.ui.toast('已恢复未保存的作息修改', 'info');
+    }
     pc.appendChild(table);
     pc.appendChild(C('div', { class: 'row', style: { marginTop: '12px' } },
       C('button', {
@@ -84,10 +97,91 @@
           var periods = inputs.map(function (x, i) {
             return { n: i + 1, start: x.st.value, end: x.en.value };
           });
-          saveSettings({ periods: periods }, '作息时间已保存');
+          saveSettings({ periods: periods }, '作息时间已保存').then(function () {
+            Panel.util.draft.clear('timetable.periods');
+          });
         }
       }, '保存作息')));
     page.appendChild(pc);
+
+    /* ---------- 调休补课与放假 ---------- */
+    var ac = C('div', { class: 'card' });
+    ac.appendChild(C('div', { class: 'card-title' },
+      C('span', { text: '调休补课与放假' }),
+      C('span', { class: 'sub', text: '某天按别天的课表显示 / 某天放假不显示课表' })));
+
+    var WD = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    function wdOf(dateStr) { return WD[(U.parseDate(dateStr).getDay() + 6) % 7]; }
+    function mdOf(dateStr) { var d = U.parseDate(dateStr); return (d.getMonth() + 1) + '月' + d.getDate() + '日'; }
+    function curSwaps() { return Array.isArray(s.swaps) ? s.swaps : []; }
+
+    var adjMode = 'swap';
+    var fAdjDate = C('input', { class: 'input', type: 'date' });
+    var fAdjFrom = C('input', { class: 'input', type: 'date' });
+    var adjFromField = C('div', { class: 'field' }, C('label', { text: '补哪天的课（来源日期）' }), fAdjFrom);
+    var modeRow = C('div', { class: 'row' });
+    var modeChips = [];
+    [['swap', '对调补课'], ['add', '仅补课'], ['off', '放假']].forEach(function (m) {
+      var chip = C('button', {
+        class: 'chip' + (adjMode === m[0] ? ' active' : ''), type: 'button',
+        onclick: function () {
+          adjMode = m[0];
+          modeChips.forEach(function (x) { x.el.classList.toggle('active', x.k === adjMode); });
+          adjFromField.style.display = adjMode === 'off' ? 'none' : '';
+        }
+      }, m[1]);
+      modeChips.push({ k: m[0], el: chip });
+      modeRow.appendChild(chip);
+    });
+
+    ac.appendChild(C('div', { class: 'set-grid' },
+      C('div', { class: 'field' }, C('label', { text: '安排日期' }), fAdjDate),
+      adjFromField,
+      C('div', { class: 'field set-span' }, C('label', { text: '模式' }), modeRow)));
+    ac.appendChild(C('div', { class: 'row', style: { marginTop: '12px' } },
+      C('button', {
+        class: 'btn btn-primary btn-sm', type: 'button',
+        onclick: function () {
+          if (!fAdjDate.value) { Panel.ui.toast('请选择日期', 'error'); return; }
+          if (adjMode !== 'off') {
+            if (!fAdjFrom.value) { Panel.ui.toast('请选择「补哪天的课」日期', 'error'); return; }
+            if (fAdjFrom.value === fAdjDate.value) { Panel.ui.toast('两个日期不能相同', 'error'); return; }
+          }
+          var arr = curSwaps().filter(function (e) { return !e || e.date !== fAdjDate.value; });
+          arr.push(adjMode === 'off'
+            ? { date: fAdjDate.value, mode: 'off' }
+            : { date: fAdjDate.value, from: fAdjFrom.value, mode: adjMode });
+          arr.sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); });
+          saveSettings({ swaps: arr }, adjMode === 'off' ? '已设置放假' : '已添加调休安排');
+        }
+      }, '添加安排')));
+
+    var adjList = C('div', { class: 'set-swap-list' });
+    (function renderAdjList() {
+      var arr = curSwaps();
+      if (!arr.length) {
+        adjList.appendChild(C('div', { class: 'set-tip', text: '暂无调休安排。例如：把本周六设为「补本周三的课」，课表页周六列就会显示周三的课表。' }));
+        return;
+      }
+      arr.forEach(function (e) {
+        if (!e || !e.date) return;
+        var text = e.mode === 'off'
+          ? mdOf(e.date) + ' ' + wdOf(e.date) + ' · 放假（不显示课表）'
+          : mdOf(e.date) + ' ' + wdOf(e.date) + ' ← 补 ' + mdOf(e.from) + ' ' + wdOf(e.from) +
+            (e.mode === 'swap' ? ' · 对调' : ' · 仅补课');
+        adjList.appendChild(C('div', { class: 'set-swap-row' },
+          C('span', { text: text }),
+          C('button', {
+            class: 'mini-btn', type: 'button', title: '删除',
+            onclick: function () {
+              saveSettings({ swaps: curSwaps().filter(function (x) { return !x || x.date !== e.date; }) },
+                '已删除调休安排');
+            }
+          }, '🗑️')));
+      });
+    })();
+    ac.appendChild(adjList);
+    page.appendChild(ac);
 
     /* ---------- 外观 ---------- */
     var look = C('div', { class: 'card' });
@@ -160,13 +254,13 @@
         class: 'btn', type: 'button',
         onclick: function () {
           ctx.api.custom(MOD, 'export', { method: 'GET', body: undefined }).then(function (data) {
-            var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'panel-backup-' + U.today() + '.json';
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-            Panel.ui.toast('已导出全部数据', 'success');
+            try {
+              Panel.util.saveFile('panel-backup-' + U.today() + '.json',
+                JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
+              Panel.ui.toast('已导出全部数据', 'success');
+            } catch (e) {
+              Panel.ui.toast('导出失败：' + e.message + '（刚更新过请卸载重装新版）', 'error');
+            }
           }).catch(function (e) { Panel.ui.toast(e.message, 'error'); });
         }
       }, '⬇ 导出全部数据'),
@@ -194,7 +288,10 @@
     page.appendChild(dc);
 
     /* ---------- GitHub 数据备份（所有端） ---------- */
-    if (Panel.github.available()) page.appendChild(buildGitHubCard());
+    if (Panel.github.available()) {
+      page.appendChild(buildGitHubCard());
+      page.appendChild(buildPublicCard());
+    }
 
 /* ---------- GitHub 数据同步（手动上传 / 拉取） ---------- */
   function buildGitHubCard() {
@@ -202,10 +299,10 @@
     var card = C('div', { class: 'card' });
     card.appendChild(C('div', { class: 'card-title' },
       C('span', { text: 'GitHub 数据备份' }),
-      C('span', { class: 'sub', text: '把本端数据上传保存 / 从云端拉取到本机（手动）' })));
+      C('span', { class: 'sub', text: '上传保存本端数据 / 拉取云端数据（上传手动，启动时自动检查云端更新）' })));
 
     var fTok = C('input', { class: 'input', type: 'password', value: cfg.token || '', placeholder: 'GitHub Personal Access Token（PAT，需 repo 写权限）' });
-    var status = C('div', { class: 'set-tip', text: '本端数据独立保存在设备上；GitHub 仅作为备份仓库（' + (cfg.owner || '') + '/' + (cfg.repo || '') + '@' + (cfg.branch || 'main') + '）。' });
+    var status = C('div', { class: 'set-tip', text: '本端数据独立保存在设备上；GitHub 仅作为备份仓库（' + (cfg.owner || '') + '/' + (cfg.repo || '') + '@' + (cfg.branch || 'main') + '）。启动时自动检查：云端有新推送且本端无未上传修改 → 自动拉取；有差异 → 弹窗询问，不会静默覆盖。' });
 
     function fmt(ts) {
       if (!ts) return '从未上传';
@@ -301,6 +398,70 @@
     return card;
   }
 
+  /* ---------- 公共课表发布（推送到班级公共站仓库） ---------- */
+  function buildPublicCard() {
+    var card = C('div', { class: 'card' });
+    card.appendChild(C('div', { class: 'card-title' },
+      C('span', { text: '公共课表发布' }),
+      C('span', { class: 'sub', text: '把课表（含调休补课）推送到班级公共站，同学刷新即见' })));
+
+    var def = { owner: 'microkbcrt', repo: 'class-timetable' };
+    try {
+      var saved = JSON.parse(localStorage.getItem('panel.publicRepo') || 'null');
+      if (saved && saved.owner && saved.repo) def = saved;
+    } catch (e) {}
+    var fRepo = C('input', { class: 'input', value: def.owner + '/' + def.repo, placeholder: 'owner/repo' });
+    var tip = C('div', { class: 'set-tip', text: '发布走 GitHub 令牌（上方卡片保存，PAT 需对公共仓库有写权限）；同学端打开公共站自动读取最新数据。' });
+
+    function fmtTime(ts) {
+      var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; };
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    function parseRepo(v) {
+      var m = String(v || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '').split('/');
+      return (m.length === 2 && m[0] && m[1]) ? { owner: m[0], repo: m[1] } : null;
+    }
+
+    try {
+      var last = Number(localStorage.getItem('panel.publicLastPush')) || 0;
+      if (last) tip.textContent = '上次发布：' + fmtTime(last) + ' · ' + def.owner + '/' + def.repo;
+    } catch (e) {}
+
+    card.appendChild(C('div', { class: 'set-grid' },
+      C('div', { class: 'field set-span' }, C('label', { text: '公共仓库（owner/repo）' }), fRepo)));
+    card.appendChild(tip);
+    card.appendChild(C('div', { class: 'row', style: { marginTop: '12px' } },
+      C('button', {
+        class: 'btn btn-primary btn-sm', type: 'button',
+        onclick: function () {
+          var r = parseRepo(fRepo.value);
+          if (!r) { Panel.ui.toast('仓库格式应为 owner/repo', 'error'); return; }
+          if (!tt || !tt.courses) { Panel.ui.toast('课表数据未加载', 'error'); return; }
+          var btn = this;
+          btn.disabled = true; btn.textContent = '发布中…';
+          var doc = JSON.parse(JSON.stringify(tt));
+          if (Array.isArray(doc.courses)) doc.courses = doc.courses.filter(function (c) { return c && c.shared !== false; });
+          Panel.github.putTo(r.owner, r.repo, 'main', 'data/timetable.json', JSON.stringify(doc, null, 2), 'panel: 发布公共课表')
+            .then(function () {
+              try {
+                localStorage.setItem('panel.publicRepo', JSON.stringify(r));
+                localStorage.setItem('panel.publicLastPush', String(Date.now()));
+              } catch (e) {}
+              Panel.ui.toast('已发布课表到 ' + r.owner + '/' + r.repo, 'success');
+              tip.textContent = '上次发布：' + fmtTime(Date.now()) + ' · ' + r.owner + '/' + r.repo;
+              tip.style.color = '';
+              btn.disabled = false; btn.textContent = '📤 发布课表数据';
+            })
+            .catch(function (e) {
+              Panel.ui.toast('发布失败：' + e.message, 'error');
+              tip.textContent = e.message; tip.style.color = '#e5484d';
+              btn.disabled = false; btn.textContent = '📤 发布课表数据';
+            });
+        }
+      }, '📤 发布课表数据')));
+    return card;
+  }
+
   /* ---------- 云端同步（仅本地 PHP 服务器模式） ---------- */
     if (Panel.github.mode() === 'php') page.appendChild(buildSyncCard());
 
@@ -319,10 +480,11 @@
 
   function saveSettings(patch, msg) {
     var next = Object.assign({}, tt.settings, patch);
-    ctx.api.set('timetable', 'settings', next).then(function (v) {
+    return ctx.api.set('timetable', 'settings', next).then(function (v) {
       tt.settings = v || next;
       render();
       Panel.ui.toast(msg, 'success');
+      return tt.settings;
     }).catch(function (e) { Panel.ui.toast(e.message, 'error'); });
   }
 
