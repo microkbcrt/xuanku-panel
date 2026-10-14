@@ -1,4 +1,12 @@
 {
-  "target": 64,
-  "entries": []
+  "target": 48,
+  "entries": [
+    {
+      "id": "mv8dbn1b-bjc6w",
+      "date": "2026-10-13",
+      "km": 2.16,
+      "note": "",
+      "createdAt": "2026-10-14T17:12:50.015Z"
+    }
+  ]
 }
