@@ -1,0 +1,13 @@
+{
+  "app": "xuanku-panel",
+  "pushedAt": 1791998016809,
+  "hashes": {
+    "timetable": "168c4d55",
+    "todos": "0cd32c53",
+    "pomodoro": "1df528a9",
+    "run": "93575a7b",
+    "chaoxing": "e4b17289",
+    "deadline": "98d23b68",
+    "settings": "741638a5"
+  }
+}
