@@ -67,7 +67,6 @@
       C('div', {},
         C('span', {}, '待办清单'),
         C('span', { class: 'sub', text: '日常清单 · 不设紧迫' })),
-      C('button', { class: 'chip', type: 'button', title: '有截止时间的紧迫任务请用「死线」模块', onclick: function () { Panel.navigate('deadline'); } }, '去死线'),
       C('button', { class: 'btn btn-primary btn-sm', type: 'button', onclick: function () { editTodo(null); } }, Panel.icon('plus'), '新建待办')));
 
     card.appendChild(C('div', { class: 'row', style: { marginBottom: '12px' } },
@@ -104,6 +103,10 @@
     var rel = U.relDay(t.due);
     var p = PRIO[String(t.priority || 2)] || PRIO['2'];
     var overdue = !t.done && t.due && t.due < U.today();
+    /* 已完成条目只留中性的截止日期，不再显示「逾期 X 天」红色告警 */
+    var dueBadge = t.done
+      ? C('span', { class: 'badge', text: U.fmtDate(U.parseDate(t.due)) })
+      : C('span', { class: 'badge ' + (overdue ? 'badge-danger' : rel.cls), text: rel.text });
 
     return C('div', { class: 'todo-item' + (t.done ? ' is-done' : '') + (overdue ? ' is-over' : '') },
       C('button', {
@@ -116,12 +119,12 @@
             Panel.ui.toast(saved.done ? '已完成：' + t.title : '已恢复：' + t.title, 'success');
           }).catch(function (e) { Panel.ui.toast(e.message, 'error'); });
         }
-      }, t.done ? Panel.icon('check') : ''),
+      }, t.done ? Panel.icon('checkBold') : ''),
       C('div', { class: 'todo-main', onclick: function () { editTodo(t); } },
         C('div', { class: 'todo-title', text: t.title || '（未命名）' }),
         C('div', { class: 'todo-meta' },
           C('span', { class: 'badge ' + p.cls }, '优先·' + p.label),
-          rel ? C('span', { class: 'badge ' + (overdue ? 'badge-danger' : rel.cls), text: rel.text }) : null,
+          t.due ? dueBadge : null,
           t.note ? C('span', { class: 'todo-note', text: t.note }) : null)),
       C('div', { class: 'todo-actions' },
         C('button', { class: 'mini-btn', type: 'button', title: '编辑', html: Panel.iconHtml('pencil'), onclick: function () { editTodo(t); } }),

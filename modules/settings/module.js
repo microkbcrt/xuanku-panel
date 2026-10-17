@@ -193,7 +193,8 @@
         class: 'chip' + (theme === t[0] ? ' active' : ''), type: 'button',
         onclick: function () {
           theme = t[0];
-          document.documentElement.dataset.theme = theme;
+          if (Panel.util.applyTheme) Panel.util.applyTheme(theme);
+          else document.documentElement.dataset.theme = theme;
           try { localStorage.setItem('panel.theme', theme); } catch (e) {}
           render();
         }

@@ -12,13 +12,16 @@
 .todo-item:hover { background: var(--hover); border-radius: 12px; }
 
 .todo-check {
-  flex: none; width: 24px; height: 24px; margin-top: 2px; border-radius: 50%;
+  flex: none; width: 24px; height: 24px; margin-top: 2px; padding: 0; border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--brand1) 55%, transparent);
   background: transparent; color: transparent; cursor: pointer;
-  display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  display: grid; place-items: center;
   transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast) var(--ease-out);
 }
 .todo-check:hover { transform: scale(1.08); }
+/* 完成对勾：固定尺寸的方块容器居中，避免字体/行高造成的偏移 */
+.todo-check .icon { display: block; width: 17px; height: 17px; line-height: 0; }
+.todo-check .icon svg { display: block; width: 100%; height: 100%; }
 .is-done .todo-check {
   background: var(--brand1);
   border-color: transparent; color: #fff;

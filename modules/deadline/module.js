@@ -98,8 +98,10 @@
     card.appendChild(C('div', { class: 'card-title' },
       C('div', {},
         C('span', {}, '死线清单'),
-        C('span', { class: 'sub', text: '紧迫截止任务 · 红色倒计时警告' })),
-      C('button', { class: 'chip', type: 'button', title: '日常小事项用「待办」模块', onclick: function () { Panel.navigate('todos'); } }, '去待办')));
+        C('span', { class: 'sub', text: '紧迫截止任务 · 红色倒计时警告' })
+      )
+    )
+  );
 
     var qa = U.draft.get('deadline.quickadd') || {};
     var titleIn = C('input', { class: 'input', type: 'text', value: qa.title || '', placeholder: '任务（如：数学作业提交）' });
@@ -179,7 +181,7 @@
             Panel.ui.toast(saved.done ? '完成：' + t.title : '已恢复：' + t.title, 'success');
           }).catch(function (e) { Panel.ui.toast(e.message, 'error'); });
         }
-      }, done ? Panel.icon('check') : ''),
+      }, done ? Panel.icon('checkBold') : ''),
       C('div', { class: 'dl-main', onclick: function () { edit(t); } },
         C('div', { class: 'dl-head' },
           C('span', { class: 'dl-title', text: t.title || '（未命名）' }),

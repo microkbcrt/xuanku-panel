@@ -68,6 +68,8 @@
     box: '<path d="M5.5 5h13l3.5 7v7H2v-7z"/><path d="M22 12h-6l-2 3h-4l-2-3H2"/>',
     warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    /* 圆形勾选按钮内的完成对勾：加粗圆头，几何居中（不要用 bi 字体图标，基线偏移会歪） */
+    checkBold: '<path stroke-width="3" d="M5.7 12.4l4.3 4.3L18.3 7.6"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
     pencil: '<path d="M17 3l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/>',
@@ -81,9 +83,32 @@
     '🎉': 'check', '📋': 'list', '✅': 'check', '✏️': 'pencil', '🗑️': 'trash',
     '☕': 'timer', '🌙': 'moon', '☀️': 'sun'
   };
+  var BI_ICONS = {
+    calendar: 'bi-calendar3',
+    list: 'bi-list-ul',
+    timer: 'bi-stopwatch',
+    run: 'bi-person-walking',
+    book: 'bi-book',
+    gear: 'bi-gear',
+    moon: 'bi-moon-stars',
+    sun: 'bi-sun',
+    spark: 'bi-star',
+    box: 'bi-envelope-paper',
+    warn: 'bi-exclamation-triangle',
+    check: 'bi-check2-circle',
+    close: 'bi-x-lg',
+    info: 'bi-info-circle',
+    pencil: 'bi-pencil-square',
+    trash: 'bi-trash3',
+    chevronL: 'bi-chevron-left',
+    chevronR: 'bi-chevron-right',
+    plus: 'bi-plus-lg'
+  };
   function iconHtml(name) {
     if (!name) return null;
-    var key = ICONS[name] ? name : ICON_ALIAS[name];
+    var key = BI_ICONS[name] ? name : ICON_ALIAS[name];
+    if (BI_ICONS[key]) return '<i class="bi ' + BI_ICONS[key] + '" aria-hidden="true"></i>';
+    key = ICONS[name] ? name : ICON_ALIAS[name];
     return key ? SVG_ATTRS + ICONS[key] + '</svg>' : null;
   }
   function svgNode(name, cls) {
@@ -98,6 +123,16 @@
       return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     },
     pad: function (n) { return n < 10 ? '0' + n : '' + n; },
+    /* 统一切换深浅色：同步 data-theme + Bootstrap 的 data-bs-theme + 移动端主题色
+       （Bootstrap 5.3 组件底色/文字色由 data-bs-theme 决定，漏同步会残留浅底黑字） */
+    applyTheme: function (t) {
+      t = t === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+      document.documentElement.dataset.bsTheme = t;
+      var mc = document.querySelector('meta[name="theme-color"]');
+      if (mc) mc.setAttribute('content', t === 'dark' ? '#11161D' : '#EEF1F5');
+      return t;
+    },
     today: function (d) {
       d = d || new Date();
       return d.getFullYear() + '-' + util.pad(d.getMonth() + 1) + '-' + util.pad(d.getDate());
@@ -970,6 +1005,16 @@
     /* 是否有弹窗（含编辑表单）打开：用于避免后台自动刷新覆盖正在编辑的内容 */
     hasOpenModal: function () { return modalStack.length > 0; },
 
+    /* 关闭最上层弹窗（Android 返回键用）。返回 false = 当前没有弹窗。
+       不可关闭的弹窗（dismissible:false）拦住返回键但不关闭 */
+    closeTopModal: function () {
+      if (!modalStack.length) return false;
+      var top = modalStack[modalStack.length - 1];
+      if (top.dismissible === false) return true;
+      try { top.close(); } catch (e) {}
+      return true;
+    },
+
     toast: function (msg, type) {
       var t = el('div', { class: 'toast ' + (type || 'info') },
         svgNode(type === 'success' ? 'check' : type === 'error' ? 'close' : 'info', 'toast-icon'), msg);
@@ -982,13 +1027,15 @@
 
     modal: function (opt) {
       opt = opt || {};
-      var body = el('div', { class: 'modal-body' });
+      var body = el('div', {
+        class: 'modal-body' + (opt.bodyClass ? ' ' + opt.bodyClass : '')
+      });
       append(body, typeof opt.body === 'function' ? opt.body() : opt.body);
 
       var foot = null;
       var close = function () { destroy(); };
 
-      var box = el('div', { class: 'modal' },
+      var box = el('div', { class: 'modal modal-content' },
         el('div', { class: 'modal-head' },
           el('h3', { text: opt.title || '' }),
           el('button', { class: 'modal-close', type: 'button', 'aria-label': '关闭', html: iconHtml('close') || '✕', onclick: close })),
@@ -1031,7 +1078,7 @@
       modalRoot.appendChild(overlay);
       document.addEventListener('keydown', onKey);
 
-      var handle = { close: close, root: overlay, body: body, box: box };
+      var handle = { close: close, root: overlay, body: body, box: box, dismissible: opt.dismissible !== false };
       modalStack.push(handle);
 
       setTimeout(function () {
@@ -1091,17 +1138,17 @@
       (opt.fields || []).forEach(function (f) {
         var input;
         if (f.type === 'select') {
-          input = el('select', { class: 'input', name: f.name });
+          input = el('select', { class: 'input form-select', name: f.name });
           (f.options || []).forEach(function (o) {
             var ov = typeof o === 'object' ? o.value : o;
             var ol = typeof o === 'object' ? o.label : o;
             input.appendChild(el('option', { value: ov, text: ol }));
           });
         } else if (f.type === 'textarea') {
-          input = el('textarea', { class: 'input', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
+          input = el('textarea', { class: 'input form-control', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
         } else {
           input = el('input', {
-            class: 'input', name: f.name, type: f.type || 'text',
+            class: 'input form-control', name: f.name, type: f.type || 'text',
             placeholder: f.placeholder || '', min: f.min, max: f.max, step: f.step
           });
         }
@@ -1218,7 +1265,19 @@
       v = { el: section, mounted: false };
       views.set(id, v);
     }
+    placePageFooter();
     return v;
+  }
+
+  /* ---------------- 页脚：每页最底部的一句调侃 ---------------- */
+  var pageFooterEl = null;
+  function placePageFooter() {
+    var vp = document.getElementById('viewport');
+    if (!vp) return;
+    if (!pageFooterEl) {
+      pageFooterEl = el('div', { class: 'page-footer' }, el('span', { text: '我是有底线的' }));
+    }
+    vp.appendChild(pageFooterEl); // 始终保持在视图容器末尾，避免被新视图挤到前面
   }
 
   /* ---------------- 导航 ---------------- */
@@ -1301,11 +1360,23 @@
     };
   }
 
+  /* ---------------- 返回键（Android 原生壳调用） ----------------
+     只负责关弹窗（模块切换不算层级，2026-10-17 按用户反馈去掉逐级回退——
+     切了 4 个模块想退出就得按 6 次）。关不了弹窗就交回原生壳：
+     Toast「再按一次退出」，2.5 秒内再按才退出（共 2 次）。 */
+  function backAction() {
+    return ui.closeTopModal();
+  }
+  window.__panelBack = function () { return backAction() ? 1 : 0; };
+
   /* ---------------- 外壳渲染 ---------------- */
   function buildNav() {
     var sidenav = document.getElementById('sidenav');
     var tabbar = document.getElementById('tabbar');
     clear(sidenav); clear(tabbar);
+
+    /* 只有一个模块时（公共课表站/单模块静态站）：底部导航无意义，交给 CSS 隐藏并回收底部留白 */
+    if (META.length <= 1) document.documentElement.setAttribute('data-solo', '1');
 
     META.forEach(function (meta) {
       sidenav.appendChild(el('button', {
@@ -1313,8 +1384,7 @@
         onclick: function () { navigate(meta.id); }
       },
         svgNode(meta.icon || '🧩', 'nav-icon'),
-        el('span', { text: meta.name }),
-        meta.description ? el('span', { class: 'nav-desc', text: meta.description.slice(0, 2) }) : null));
+        el('span', { text: meta.name })));
 
       tabbar.appendChild(el('button', {
         class: 'tab-item', type: 'button', dataset: { mod: meta.id },
@@ -1345,9 +1415,10 @@
       var light = document.documentElement.dataset.theme === 'light';
       btn.innerHTML = iconHtml(light ? 'sun' : 'moon') || (light ? '☀️' : '🌙');
     }
+    util.applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     btn.addEventListener('click', function () {
       var next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-      document.documentElement.dataset.theme = next;
+      util.applyTheme(next);
       try { localStorage.setItem('panel.theme', next); } catch (e) {}
       paint();
     });
