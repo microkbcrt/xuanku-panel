@@ -41,9 +41,9 @@
       "title": "大赛作品提交",
       "note": "",
       "deadline": "2026-10-24T00:00",
-      "done": false,
+      "done": true,
       "createdAt": "2026-10-19T04:04:18.844Z",
-      "doneAt": ""
+      "doneAt": "2026-10-28T03:43:19.679Z"
     },
     {
       "id": "261021-073951",
@@ -58,7 +58,7 @@
       "id": "261022-027099",
       "title": "批改网作文",
       "note": "",
-      "deadline": "2026-10-27T00:00",
+      "deadline": "2026-11-02T00:00",
       "done": false,
       "createdAt": "2026-10-22T02:25:16.621Z",
       "doneAt": ""
@@ -68,8 +68,17 @@
       "title": "数学作业提交",
       "note": "",
       "deadline": "2026-10-27T00:00",
-      "done": false,
+      "done": true,
       "createdAt": "2026-10-22T03:49:43.211Z",
+      "doneAt": "2026-10-28T03:48:37.856Z"
+    },
+    {
+      "id": "261028-875a05",
+      "title": "军事理论作业PPT",
+      "note": "",
+      "deadline": "2026-10-29T13:00",
+      "done": false,
+      "createdAt": "2026-10-28T03:48:47.222Z",
       "doneAt": ""
     }
   ]
