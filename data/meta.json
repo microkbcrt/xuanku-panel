@@ -1,13 +1,13 @@
 {
   "app": "xuanku-panel",
-  "pushedAt": 1793166231149,
+  "pushedAt": 1793186260766,
   "hashes": {
-    "timetable": "168c4d55",
+    "timetable": "4345b26d",
     "todos": "7e7081fc",
     "pomodoro": "1df528a9",
     "run": "f562d14b",
     "chaoxing": "e4b17289",
-    "deadline": "b0e99e2e",
+    "deadline": "6d94dc3d",
     "settings": "741638a5"
   }
 }
